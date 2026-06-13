@@ -1,0 +1,27 @@
+services:
+    gateway-service:
+        build: ./gateway-service
+        ports:
+            - "8080:8080"
+        environment:
+            GATEWAY_SERVICE_UPLOAD_DIR: /app/uploads
+        depends_on:
+            - postgres
+        volumes:
+            - uploads_data:/app/uploads
+
+    postgres:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        ports:
+            - "5432:5432"
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+    
+volumes:
+    postgres_data:
+    uploads_data:
+
