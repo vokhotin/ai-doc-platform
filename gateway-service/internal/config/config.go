@@ -3,14 +3,16 @@ package config
 import "os"
 
 type Config struct {
-	Port      string
-	UploadDir string
+	Port        string
+	UploadDir   string
+	DatabaseURL string
 }
 
 func Load() Config {
 	return Config{
-		Port:      getEnv("GATEWAY_SERVICE_PORT", "8080"),
-		UploadDir: getEnv("GATEWAY_SERVICE_UPLOAD_DIR", "./uploads"),
+		Port:        getEnv("GATEWAY_SERVICE_PORT", "8080"),
+		UploadDir:   getEnv("GATEWAY_SERVICE_UPLOAD_DIR", "./uploads"),
+		DatabaseURL: getEnv("GATEWAY_SERVICE_DB_URL", ""),
 	}
 }
 

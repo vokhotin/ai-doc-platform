@@ -8,5 +8,6 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o gateway ./cmd/server/main.go
 FROM alpine:3.21
 WORKDIR /app
 COPY --from=builder /app/gateway .
+COPY migrations ./migrations
 EXPOSE 8080
 CMD ["./gateway"]

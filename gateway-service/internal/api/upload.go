@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"mime/multipart"
@@ -11,7 +12,7 @@ import (
 )
 
 type documentService interface {
-	Upload(file multipart.File, filename string) (*service.UploadResult, error)
+	Upload(ctx context.Context, file multipart.File, filename string) (*service.UploadResult, error)
 }
 
 func UploadHandler(svc documentService) http.HandlerFunc {
@@ -37,6 +38,7 @@ func UploadHandler(svc documentService) http.HandlerFunc {
 		}
 
 		result, err := svc.Upload(
+			r.Context(),
 			file,
 			safeName,
 		)
