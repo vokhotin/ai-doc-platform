@@ -17,6 +17,7 @@ type FileStorage interface {
 
 type DocumentRepository interface {
 	Save(ctx context.Context, doc *model.Document) error
+	GetByID(ctx context.Context, id string) (*model.Document, error)
 }
 
 type UploadResult struct {
@@ -66,4 +67,8 @@ func (s *DocumentService) Upload(
 		ID:       documentID,
 		Filename: filename,
 	}, nil
+}
+
+func (s *DocumentService) GetDocument(ctx context.Context, id string) (*model.Document, error) {
+	return s.dr.GetByID(ctx, id)
 }

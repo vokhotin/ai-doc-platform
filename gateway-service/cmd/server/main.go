@@ -46,6 +46,7 @@ func main() {
 
 	r.Get("/health", api.HealthHandler)
 	r.Post("/upload", api.UploadHandler(docSvc))
+	r.Get("/documents/{id}", api.DocumentHandler(docSvc))
 
 	log.Printf("Server started on port %v", cfg.Port)
 	err = http.ListenAndServe(":"+cfg.Port, r)

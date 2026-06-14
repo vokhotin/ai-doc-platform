@@ -20,3 +20,13 @@ func (r *PostgresDocumentRepository) Save(ctx context.Context, doc *model.Docume
 		doc.ID, doc.OriginalFilename, doc.StoredFilename, doc.Status, doc.CreatedAt)
 	return err
 }
+
+func (r *PostgresDocumentRepository) GetByID(ctx context.Context, id string) (*model.Document, error) {
+	row := r.db.QueryRow(ctx, "SELECT id, original_filename, stored_filename, status, created_at FROM documents WHERE id = $1", id)
+	doc := &model.Document{}
+	err := row.Scan(&doc.ID, &doc.OriginalFilename, &doc.StoredFilename, &doc.Status, &doc.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
