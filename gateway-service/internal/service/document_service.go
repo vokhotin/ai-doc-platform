@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"path/filepath"
 	"time"
@@ -62,6 +63,8 @@ func (s *DocumentService) Upload(
 	if err != nil {
 		return nil, err
 	}
+
+	slog.Info("saved document", "id", doc.ID)
 
 	return &UploadResult{
 		ID:       documentID,

@@ -59,5 +59,7 @@ func UploadHandler(svc documentService) http.HandlerFunc {
 			slog.Error("failed to encode response", "error", err)
 			return
 		}
+
+		slog.Info("uploaded file", "id", result.ID, "filename", result.Filename)
 	}
 }
