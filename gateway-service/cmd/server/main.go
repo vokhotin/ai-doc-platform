@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -21,22 +21,27 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
 	r := chi.NewRouter()
 	cfg := config.Load()
 
 	if cfg.DatabaseURL == "" {
-		log.Fatal("Database URL not set")
+		slog.Error("Database URL not set")
+		os.Exit(1)
 	}
 
 	if err := os.MkdirAll(cfg.UploadDir, 0755); err != nil {
-		log.Fatal(err)
+		slog.Error("Could not create upload dir", "error", err)
+		os.Exit(1)
 	}
 
 	runMigrations(cfg.DatabaseURL)
 
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Could not initialize connection pool", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -48,10 +53,10 @@ func main() {
 	r.Post("/upload", api.UploadHandler(docSvc))
 	r.Get("/documents/{id}", api.DocumentHandler(docSvc))
 
-	log.Printf("Server started on port %v", cfg.Port)
+	slog.Info("Server started on port", "port", cfg.Port)
 	err = http.ListenAndServe(":"+cfg.Port, r)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Could not run the application", "error", err)
 	}
 }
 
@@ -59,16 +64,18 @@ func runMigrations(databaseURL string) {
 	migrateURL := strings.Replace(databaseURL, "postgres://", "pgx5://", 1)
 	m, err := migrate.New("file://migrations", migrateURL)
 	if err != nil {
-		log.Fatal("failed to create migrator: ", err)
+		slog.Error("failed to create migrator", "error", err)
+		os.Exit(1)
 	}
 	defer m.Close()
 
 	if err := m.Up(); err != nil {
 		if !errors.Is(err, migrate.ErrNoChange) {
-			log.Fatal("failed to run migrations: ", err)
+			slog.Error("failed to run migrations", "error", err)
+			os.Exit(1)
 		}
-		log.Printf("Nothing to migrate.")
+		slog.Info("Nothing to migrate.")
 	} else {
-		log.Printf("Migrations applied.")
+		slog.Info("Migrations applied.")
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -23,7 +23,7 @@ func DocumentHandler(svc documentGetService) http.HandlerFunc {
 		document, err := svc.GetDocument(r.Context(), documentID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				log.Printf("Document %v does not exist", documentID)
+				slog.Info("Document does not exist", "id", documentID)
 				http.Error(w, "no document found", http.StatusNotFound)
 				return
 			}
@@ -42,7 +42,7 @@ func DocumentHandler(svc documentGetService) http.HandlerFunc {
 			"created_at":      document.CreatedAt.Format(time.RFC3339),
 		})
 		if err != nil {
-			log.Printf("failed to encode response: %v", err)
+			slog.Error("failed to encode response", "error", err)
 			return
 		}
 	}

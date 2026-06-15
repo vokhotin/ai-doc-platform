@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -27,7 +27,7 @@ func UploadHandler(svc documentService) http.HandlerFunc {
 		defer func(file multipart.File) {
 			err := file.Close()
 			if err != nil {
-				log.Printf("failed to close upload file: %v", err)
+				slog.Warn("failed to close upload file", "error", err)
 			}
 		}(file)
 
@@ -43,7 +43,7 @@ func UploadHandler(svc documentService) http.HandlerFunc {
 			safeName,
 		)
 		if err != nil {
-			log.Printf("failed to upload file: %v", err)
+			slog.Error("failed to upload file", "error", err)
 			http.Error(w, "failed to upload file", http.StatusInternalServerError)
 			return
 		}
@@ -56,7 +56,7 @@ func UploadHandler(svc documentService) http.HandlerFunc {
 			"filename": result.Filename,
 		})
 		if err != nil {
-			log.Printf("failed to encode response: %v", err)
+			slog.Error("failed to encode response", "error", err)
 			return
 		}
 	}
