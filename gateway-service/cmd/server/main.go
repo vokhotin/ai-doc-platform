@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/api"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/config"
+	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/inference"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/repository"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/service"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/storage"
@@ -47,7 +48,8 @@ func main() {
 
 	fileStorage := storage.NewLocalFileStorage(cfg.UploadDir)
 	documentRepository := repository.NewPostgresDocumentRepository(pool)
-	docSvc := service.NewDocumentService(fileStorage, documentRepository)
+	inferenceClient := inference.NewHTTPInferenceClient(cfg.InferenceURL)
+	docSvc := service.NewDocumentService(fileStorage, documentRepository, inferenceClient)
 
 	r.Get("/health", api.HealthHandler)
 	r.Post("/upload", api.UploadHandler(docSvc))
