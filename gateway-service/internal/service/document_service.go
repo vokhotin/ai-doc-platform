@@ -21,6 +21,10 @@ type DocumentRepository interface {
 	GetByID(ctx context.Context, id string) (*model.Document, error)
 }
 
+type InferenceClient interface {
+	Predict(ctx context.Context, documentID string, text string) (*model.InferenceResult, error)
+}
+
 type UploadResult struct {
 	ID       string `json:"id"`
 	Filename string `json:"filename"`
@@ -29,12 +33,14 @@ type UploadResult struct {
 type DocumentService struct {
 	fs FileStorage
 	dr DocumentRepository
+	ic InferenceClient
 }
 
-func NewDocumentService(fs FileStorage, dr DocumentRepository) *DocumentService {
+func NewDocumentService(fs FileStorage, dr DocumentRepository, ic InferenceClient) *DocumentService {
 	return &DocumentService{
 		fs: fs,
 		dr: dr,
+		ic: ic,
 	}
 }
 
@@ -65,6 +71,12 @@ func (s *DocumentService) Upload(
 	}
 
 	slog.Info("saved document", "id", doc.ID)
+
+	_, err = s.ic.Predict(ctx, doc.ID, doc.OriginalFilename)
+	if err != nil {
+		slog.Error("failed to predict type of document", "id", doc.ID)
+		return nil, err
+	}
 
 	return &UploadResult{
 		ID:       documentID,

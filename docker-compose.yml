@@ -6,6 +6,7 @@ services:
         environment:
             GATEWAY_SERVICE_UPLOAD_DIR: /app/uploads
             GATEWAY_SERVICE_DB_URL: ${DATABASE_URL_DOCKER}
+            INFERENCE_URL_DOCKER: ${INFERENCE_URL_DOCKER}
         depends_on:
             postgres:
                 condition: service_healthy
