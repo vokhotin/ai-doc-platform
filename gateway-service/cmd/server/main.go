@@ -47,7 +47,7 @@ func main() {
 	defer pool.Close()
 
 	fileStorage := storage.NewLocalFileStorage(cfg.UploadDir)
-	documentRepository := repository.NewPostgresDocumentRepository(pool)
+	documentRepository := repository.NewPostgresRepository(pool)
 	inferenceClient := inference.NewHTTPInferenceClient(cfg.InferenceURL)
 	docSvc := service.NewDocumentService(fileStorage, documentRepository, inferenceClient)
 

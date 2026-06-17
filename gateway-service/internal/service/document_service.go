@@ -17,7 +17,7 @@ type FileStorage interface {
 }
 
 type DocumentRepository interface {
-	Save(ctx context.Context, doc *model.Document) error
+	SaveDocument(ctx context.Context, doc *model.Document) error
 	GetByID(ctx context.Context, id string) (*model.Document, error)
 }
 
@@ -65,7 +65,7 @@ func (s *DocumentService) Upload(
 		Status:           model.StatusPending,
 		CreatedAt:        time.Now().UTC(),
 	}
-	err = s.dr.Save(ctx, doc)
+	err = s.dr.SaveDocument(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (s *DocumentService) Upload(
 
 	_, err = s.ic.Predict(ctx, doc.ID, doc.OriginalFilename)
 	if err != nil {
-		slog.Error("failed to predict type of document", "id", doc.ID)
+		slog.Error("failed to predict type of document", "id", doc.ID, "error", err)
 		return nil, err
 	}
 

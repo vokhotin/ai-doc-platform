@@ -1,6 +1,7 @@
 package inference
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,14 +13,14 @@ import (
 )
 
 type HTTPInferenceClient struct {
-	InferenceURL string
+	inferenceURL string
 	httpClient   *http.Client
 }
 
 type predictResponse struct {
 	DocumentID string  `json:"document_id"`
 	Label      string  `json:"label"`
-	Confidence float64 `json:"confidence"`
+	Confidence float32 `json:"confidence"`
 }
 
 type predictRequest struct {
@@ -29,7 +30,7 @@ type predictRequest struct {
 
 func NewHTTPInferenceClient(httpInferenceURL string) *HTTPInferenceClient {
 	return &HTTPInferenceClient{
-		InferenceURL: httpInferenceURL,
+		inferenceURL: httpInferenceURL,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -39,7 +40,13 @@ func (c *HTTPInferenceClient) Predict(ctx context.Context, documentID string, te
 		DocumentID: documentID,
 		Text:       text,
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.InferenceURL+"/predict", body)
+	payload, err := json.Marshal(body)
+	if err != nil {
+		slog.Error("Failed to marshal request body", "error", err)
+		return nil, err
+	}
+	buffer := bytes.NewBuffer(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.inferenceURL+"/predict", buffer)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +59,7 @@ func (c *HTTPInferenceClient) Predict(ctx context.Context, documentID string, te
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("Expected 200 OK response", "status", resp.Status, "request", body, "response", resp.Request.Body)
+		slog.Warn("Expected 200 OK response", "status", resp.Status)
 		return nil, fmt.Errorf("inference service responded with %s", resp.Status)
 	}
 

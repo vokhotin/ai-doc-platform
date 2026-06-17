@@ -18,4 +18,5 @@ const (
 	StatusPending    DocumentStatus = "pending"
 	StatusProcessing DocumentStatus = "processing"
 	StatusDone       DocumentStatus = "done"
+	StatusFailed     DocumentStatus = "failed"
 )
