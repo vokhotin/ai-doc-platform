@@ -31,4 +31,5 @@ func (pr *PostgresRepository) UpdateDocumentStatus(ctx context.Context, document
 	if exec.RowsAffected() == 0 {
 		return fmt.Errorf("document %s not found", documentID)
 	}
+	return nil
 }

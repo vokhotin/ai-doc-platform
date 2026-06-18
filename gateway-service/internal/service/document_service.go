@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -16,9 +17,12 @@ type FileStorage interface {
 	Save(filename string, src io.Reader) error
 }
 
-type DocumentRepository interface {
+type Repository interface {
 	SaveDocument(ctx context.Context, doc *model.Document) error
 	GetByID(ctx context.Context, id string) (*model.Document, error)
+	UpdateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error
+	SavePredictionAndMarkDocumentDone(ctx context.Context, prediction *model.Prediction) error
+	GetLatestPredictionByDocumentId(ctx context.Context, documentId string) (*model.Prediction, error)
 }
 
 type InferenceClient interface {
@@ -31,16 +35,16 @@ type UploadResult struct {
 }
 
 type DocumentService struct {
-	fs FileStorage
-	dr DocumentRepository
-	ic InferenceClient
+	fs   FileStorage
+	repo Repository
+	ic   InferenceClient
 }
 
-func NewDocumentService(fs FileStorage, dr DocumentRepository, ic InferenceClient) *DocumentService {
+func NewDocumentService(fs FileStorage, repo Repository, ic InferenceClient) *DocumentService {
 	return &DocumentService{
-		fs: fs,
-		dr: dr,
-		ic: ic,
+		fs:   fs,
+		repo: repo,
+		ic:   ic,
 	}
 }
 
@@ -65,18 +69,39 @@ func (s *DocumentService) Upload(
 		Status:           model.StatusPending,
 		CreatedAt:        time.Now().UTC(),
 	}
-	err = s.dr.SaveDocument(ctx, doc)
+	err = s.repo.SaveDocument(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
 
 	slog.Info("saved document", "id", doc.ID)
 
-	_, err = s.ic.Predict(ctx, doc.ID, doc.OriginalFilename)
+	inferenceResult, err := s.ic.Predict(ctx, doc.ID, doc.OriginalFilename)
 	if err != nil {
 		slog.Error("failed to predict type of document", "id", doc.ID, "error", err)
+		errUpdate := s.updateDocumentStatus(ctx, documentID, model.StatusFailed)
+		if errUpdate != nil {
+			return nil, fmt.Errorf("failed to predict and failed to update document status. prediction error: \n%w,"+
+				" \nUpdate document error\n%s", err, errUpdate)
+		}
 		return nil, err
 	}
+
+	slog.Info("predict result", "id", doc.ID, "label", inferenceResult.Label, "confidence", inferenceResult.Confidence)
+
+	prediction := &model.Prediction{
+		ID:         uuid.New().String(),
+		DocumentID: inferenceResult.DocumentID,
+		Label:      inferenceResult.Label,
+		Confidence: inferenceResult.Confidence,
+		CreatedAt:  time.Now().UTC(),
+	}
+	err = s.repo.SavePredictionAndMarkDocumentDone(ctx, prediction)
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Info("save prediction and updated document", "id", doc.ID, "predictionID", prediction.ID)
 
 	return &UploadResult{
 		ID:       documentID,
@@ -84,6 +109,15 @@ func (s *DocumentService) Upload(
 	}, nil
 }
 
+func (s *DocumentService) updateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error {
+	err := s.repo.UpdateDocumentStatus(ctx, documentID, status)
+	if err != nil {
+		slog.Error("failed to update document status", "id", documentID, "status", status, "error", err)
+		return err
+	}
+	return nil
+}
+
 func (s *DocumentService) GetDocument(ctx context.Context, id string) (*model.Document, error) {
-	return s.dr.GetByID(ctx, id)
+	return s.repo.GetByID(ctx, id)
 }

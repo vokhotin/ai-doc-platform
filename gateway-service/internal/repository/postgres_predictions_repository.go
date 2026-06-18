@@ -6,28 +6,35 @@ import (
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/model"
 )
 
-func (pr *PostgresRepository) SavePrediction(ctx context.Context, prediction *model.Prediction) error {
-	_, err := pr.db.Exec(ctx, "INSERT INTO predictions (id, document_id, label, confidence, created_at) VALUES ($1, $2, $3, $4, $5)",
-		prediction.Id, prediction.DocumentID, prediction.Label, prediction.Confidence, prediction.CreatedAt)
+func (pr *PostgresRepository) SavePredictionAndMarkDocumentDone(ctx context.Context, prediction *model.Prediction) error {
+	tx, err := pr.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	_, err = tx.Exec(ctx, "INSERT INTO predictions (id, document_id, label, confidence, created_at) VALUES ($1, $2, $3, $4, $5)",
+		prediction.ID, prediction.DocumentID, prediction.Label, prediction.Confidence, prediction.CreatedAt)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, "UPDATE documents SET status = $1 WHERE id = $2", model.StatusDone, prediction.DocumentID)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
 	return err
 }
 
-func (pr *PostgresRepository) GetPredictionsByDocumentId(ctx context.Context, documentId string) ([]*model.Prediction, error) {
-	rows, err := pr.db.Query(ctx, "SELECT id, document_id, label, confidence, created_at FROM predictions WHERE document_id = $1", documentId)
+func (pr *PostgresRepository) GetLatestPredictionByDocumentId(ctx context.Context, documentId string) (*model.Prediction, error) {
+	row := pr.db.QueryRow(ctx, "SELECT id, document_id, label, confidence, created_at FROM predictions WHERE document_id = $1 ORDER BY created_at DESC LIMIT 1", documentId)
+	prediction := &model.Prediction{}
+	err := row.Scan(&prediction.ID, &prediction.DocumentID, &prediction.Label, &prediction.Confidence, &prediction.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var predictions []*model.Prediction
-	for rows.Next() {
-		prediction := &model.Prediction{}
-		if err := rows.Scan(&prediction.Id, &prediction.DocumentID, &prediction.Label, &prediction.Confidence, &prediction.CreatedAt); err != nil {
-			return predictions, err
-		}
-		predictions = append(predictions, prediction)
-	}
-	if err := rows.Err(); err != nil {
-		return predictions, err
-	}
-	return predictions, nil
+	return prediction, nil
 }

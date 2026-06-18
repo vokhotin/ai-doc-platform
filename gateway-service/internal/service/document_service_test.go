@@ -21,13 +21,27 @@ func (m *mockFileStorage) Save(filename string, src io.Reader) error {
 	return m.saveErr
 }
 
-type mockDocumentRepository struct {
-	saveErr error
+type mockRepository struct {
+	prediction     *model.Prediction
+	saveErr        error
+	updateDocError error
+	txError        error
+}
+
+func (m *mockRepository) UpdateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error {
+	return m.updateDocError
+}
+
+func (m *mockRepository) SavePredictionAndMarkDocumentDone(ctx context.Context, prediction *model.Prediction) error {
+	return m.txError
+}
+
+func (m *mockRepository) GetLatestPredictionByDocumentId(ctx context.Context, documentId string) (*model.Prediction, error) {
+	return m.prediction, m.saveErr
 }
 
 type mockInferenceService struct {
-	documentID string
-	text       string
+	*model.InferenceResult
 	predictErr error
 }
 
@@ -35,18 +49,21 @@ type mockCloserReader struct {
 	io.ReadCloser
 }
 
-func (m *mockDocumentRepository) SaveDocument(ctx context.Context, doc *model.Document) error {
+func (m *mockRepository) SaveDocument(ctx context.Context, doc *model.Document) error {
 	return m.saveErr
 }
 
-func (m *mockDocumentRepository) GetByID(ctx context.Context, id string) (*model.Document, error) {
+func (m *mockRepository) GetByID(ctx context.Context, id string) (*model.Document, error) {
 	return nil, nil
 }
 
 func (m *mockInferenceService) Predict(ctx context.Context, documentID string, text string) (*model.InferenceResult, error) {
-	m.documentID = documentID
-	m.text = text
-	return nil, m.predictErr
+	m.InferenceResult = &model.InferenceResult{
+		DocumentID: documentID,
+		Label:      "finance",
+		Confidence: 0.8,
+	}
+	return m.InferenceResult, m.predictErr
 }
 
 func (rc mockCloserReader) ReadAt(p []byte, off int64) (n int, err error) {
@@ -62,15 +79,16 @@ func TestDocumentService_Upload(t *testing.T) {
 		name      string
 		filename  string
 		storage   *mockFileStorage
-		repo      *mockDocumentRepository
+		repo      *mockRepository
 		inference *mockInferenceService
 		wantErr   bool
 	}{
-		{"success", "test.pdf", &mockFileStorage{}, &mockDocumentRepository{}, &mockInferenceService{}, false},
-		{"success empty file extension", "test", &mockFileStorage{}, &mockDocumentRepository{}, &mockInferenceService{}, false},
-		{"storage failure", "test.pdf", &mockFileStorage{saveErr: errors.New("disk is full")}, &mockDocumentRepository{}, &mockInferenceService{}, true},
-		{"repo failure", "test.pdf", &mockFileStorage{}, &mockDocumentRepository{saveErr: errors.New("db is down")}, &mockInferenceService{}, true},
-		{"inference service failure", "test.pdf", &mockFileStorage{}, &mockDocumentRepository{}, &mockInferenceService{predictErr: errors.New("inference service is down")}, true},
+		{"success", "test.pdf", &mockFileStorage{}, &mockRepository{}, &mockInferenceService{}, false},
+		{"success empty file extension", "test", &mockFileStorage{}, &mockRepository{}, &mockInferenceService{}, false},
+		{"storage failure", "test.pdf", &mockFileStorage{saveErr: errors.New("disk is full")}, &mockRepository{}, &mockInferenceService{}, true},
+		{"repo failure", "test.pdf", &mockFileStorage{}, &mockRepository{saveErr: errors.New("db is down")}, &mockInferenceService{}, true},
+		{"inference service failure", "test.pdf", &mockFileStorage{}, &mockRepository{}, &mockInferenceService{predictErr: errors.New("inference service is down")}, true},
+		{"inference service failure and failed to update document status", "test.pdf", &mockFileStorage{}, &mockRepository{updateDocError: errors.New("failed update error")}, &mockInferenceService{predictErr: errors.New("inference service is down")}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,8 +124,8 @@ func TestDocumentService_Upload(t *testing.T) {
 					filepath.Ext(tt.storage.savedFilename))
 			}
 
-			if result.ID != tt.inference.documentID {
-				t.Errorf("expected documentID %s, got %s", result.ID, tt.inference.documentID)
+			if result.ID != tt.inference.InferenceResult.DocumentID {
+				t.Errorf("expected documentID %s, got %s", result.ID, tt.inference.InferenceResult.DocumentID)
 			}
 
 			//TODO remove filename as text and test real extraction.
