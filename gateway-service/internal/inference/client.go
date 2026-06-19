@@ -20,7 +20,7 @@ type HTTPInferenceClient struct {
 type predictResponse struct {
 	DocumentID string  `json:"document_id"`
 	Label      string  `json:"label"`
-	Confidence float32 `json:"confidence"`
+	Confidence float64 `json:"confidence"`
 }
 
 type predictRequest struct {

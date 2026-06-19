@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,8 +11,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/model"
 )
+
+type DocumentView struct {
+	Document   *model.Document
+	Prediction *model.Prediction
+}
 
 type FileStorage interface {
 	Save(filename string, src io.Reader) error
@@ -118,6 +125,20 @@ func (s *DocumentService) updateDocumentStatus(ctx context.Context, documentID s
 	return nil
 }
 
-func (s *DocumentService) GetDocument(ctx context.Context, id string) (*model.Document, error) {
-	return s.repo.GetByID(ctx, id)
+func (s *DocumentService) GetDocument(ctx context.Context, id string) (*DocumentView, error) {
+	document, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	prediction, err := s.repo.GetLatestPredictionByDocumentId(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		prediction = nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	return &DocumentView{
+		Document:   document,
+		Prediction: prediction,
+	}, nil
 }

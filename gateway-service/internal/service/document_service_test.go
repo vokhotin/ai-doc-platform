@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/model"
 )
 
@@ -22,10 +25,13 @@ func (m *mockFileStorage) Save(filename string, src io.Reader) error {
 }
 
 type mockRepository struct {
-	prediction     *model.Prediction
-	saveErr        error
-	updateDocError error
-	txError        error
+	prediction         *model.Prediction
+	document           *model.Document
+	saveErr            error
+	updateDocError     error
+	txError            error
+	getDocError        error
+	getPredictionError error
 }
 
 func (m *mockRepository) UpdateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error {
@@ -37,7 +43,7 @@ func (m *mockRepository) SavePredictionAndMarkDocumentDone(ctx context.Context, 
 }
 
 func (m *mockRepository) GetLatestPredictionByDocumentId(ctx context.Context, documentId string) (*model.Prediction, error) {
-	return m.prediction, m.saveErr
+	return m.prediction, m.getPredictionError
 }
 
 type mockInferenceService struct {
@@ -54,7 +60,7 @@ func (m *mockRepository) SaveDocument(ctx context.Context, doc *model.Document) 
 }
 
 func (m *mockRepository) GetByID(ctx context.Context, id string) (*model.Document, error) {
-	return nil, nil
+	return m.document, m.getDocError
 }
 
 func (m *mockInferenceService) Predict(ctx context.Context, documentID string, text string) (*model.InferenceResult, error) {
@@ -72,6 +78,90 @@ func (rc mockCloserReader) ReadAt(p []byte, off int64) (n int, err error) {
 
 func (rc mockCloserReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, nil
+}
+
+func TestDocumentService_GetDocument(t *testing.T) {
+	tests := []struct {
+		name      string
+		storage   *mockFileStorage
+		inference *mockInferenceService
+		repo      *mockRepository
+		wantErr   bool
+	}{
+		{"get document and prediction", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			document: &model.Document{
+				ID:               "1",
+				OriginalFilename: "invoice.pdf",
+				StoredFilename:   "123-321.pdf",
+				Status:           model.StatusDone,
+				CreatedAt:        time.Now().UTC(),
+			},
+			prediction: &model.Prediction{
+				ID:         "1",
+				DocumentID: "1",
+				Label:      "finance",
+				Confidence: 0.8,
+			},
+		}, false},
+		{"get document without prediction", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			document: &model.Document{
+				ID:               "1",
+				OriginalFilename: "invoice.pdf",
+				StoredFilename:   "123-321.pdf",
+				Status:           model.StatusDone,
+				CreatedAt:        time.Now().UTC(),
+			},
+			prediction:         nil,
+			getPredictionError: pgx.ErrNoRows,
+		}, false},
+		{"no document", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			getDocError: pgx.ErrNoRows,
+		}, true},
+		{"get document but prediction returns some error", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			document: &model.Document{
+				ID:               "1",
+				OriginalFilename: "invoice.pdf",
+				StoredFilename:   "123-321.pdf",
+				Status:           model.StatusDone,
+				CreatedAt:        time.Now().UTC(),
+			},
+			getPredictionError: fmt.Errorf("some error"),
+		}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc := NewDocumentService(tt.storage, tt.repo, tt.inference)
+
+			documentView, err := svc.GetDocument(ctx, "1")
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expect an error got nothing")
+				}
+				if !(errors.Is(err, tt.repo.getPredictionError) || errors.Is(err, tt.repo.getDocError)) {
+					t.Fatalf("expect no rows exception got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expect no error got %v", err)
+			}
+			if documentView == nil {
+				t.Fatalf("expect documentView got nil")
+			}
+			if documentView.Document == nil {
+				t.Fatalf("expect document got nil")
+			}
+			if tt.repo.getPredictionError == nil {
+				if documentView.Prediction == nil {
+					t.Fatalf("expect prediction got nil")
+				}
+			}
+
+		})
+	}
 }
 
 func TestDocumentService_Upload(t *testing.T) {
