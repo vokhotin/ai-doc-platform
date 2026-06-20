@@ -3,11 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/vokhotin/ai-doc-platform/gateway-service/internal/model"
 )
 
@@ -21,20 +24,52 @@ func (m *mockFileStorage) Save(filename string, src io.Reader) error {
 	return m.saveErr
 }
 
-type mockDocumentRepository struct {
-	saveErr error
+type mockRepository struct {
+	prediction         *model.Prediction
+	document           *model.Document
+	saveErr            error
+	updateDocError     error
+	txError            error
+	getDocError        error
+	getPredictionError error
+}
+
+func (m *mockRepository) UpdateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error {
+	return m.updateDocError
+}
+
+func (m *mockRepository) SavePredictionAndMarkDocumentDone(ctx context.Context, prediction *model.Prediction) error {
+	return m.txError
+}
+
+func (m *mockRepository) GetLatestPredictionByDocumentId(ctx context.Context, documentId string) (*model.Prediction, error) {
+	return m.prediction, m.getPredictionError
+}
+
+type mockInferenceService struct {
+	*model.InferenceResult
+	predictErr error
 }
 
 type mockCloserReader struct {
 	io.ReadCloser
 }
 
-func (m *mockDocumentRepository) Save(ctx context.Context, doc *model.Document) error {
+func (m *mockRepository) SaveDocument(ctx context.Context, doc *model.Document) error {
 	return m.saveErr
 }
 
-func (m *mockDocumentRepository) GetByID(ctx context.Context, id string) (*model.Document, error) {
-	return nil, nil
+func (m *mockRepository) GetByID(ctx context.Context, id string) (*model.Document, error) {
+	return m.document, m.getDocError
+}
+
+func (m *mockInferenceService) Predict(ctx context.Context, documentID string, text string) (*model.InferenceResult, error) {
+	m.InferenceResult = &model.InferenceResult{
+		DocumentID: documentID,
+		Label:      "finance",
+		Confidence: 0.8,
+	}
+	return m.InferenceResult, m.predictErr
 }
 
 func (rc mockCloserReader) ReadAt(p []byte, off int64) (n int, err error) {
@@ -45,30 +80,117 @@ func (rc mockCloserReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, nil
 }
 
-func TestDocumentService_Upload(t *testing.T) {
+func TestDocumentService_GetDocument(t *testing.T) {
 	tests := []struct {
-		name     string
-		filename string
-		storage  *mockFileStorage
-		repo     *mockDocumentRepository
-		wantErr  bool
+		name      string
+		storage   *mockFileStorage
+		inference *mockInferenceService
+		repo      *mockRepository
+		wantErr   bool
 	}{
-		{"success", "test.pdf", &mockFileStorage{}, &mockDocumentRepository{}, false},
-		{"success empty file extension", "test", &mockFileStorage{}, &mockDocumentRepository{}, false},
-		{"storage failure", "test.pdf", &mockFileStorage{saveErr: errors.New("disk is full")}, &mockDocumentRepository{}, true},
-		{"repo failure", "test.pdf", &mockFileStorage{}, &mockDocumentRepository{saveErr: errors.New("db is down")}, true},
+		{"get document and prediction", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			document: &model.Document{
+				ID:               "1",
+				OriginalFilename: "invoice.pdf",
+				StoredFilename:   "123-321.pdf",
+				Status:           model.StatusDone,
+				CreatedAt:        time.Now().UTC(),
+			},
+			prediction: &model.Prediction{
+				ID:         "1",
+				DocumentID: "1",
+				Label:      "finance",
+				Confidence: 0.8,
+			},
+		}, false},
+		{"get document without prediction", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			document: &model.Document{
+				ID:               "1",
+				OriginalFilename: "invoice.pdf",
+				StoredFilename:   "123-321.pdf",
+				Status:           model.StatusDone,
+				CreatedAt:        time.Now().UTC(),
+			},
+			prediction:         nil,
+			getPredictionError: pgx.ErrNoRows,
+		}, false},
+		{"no document", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			getDocError: pgx.ErrNoRows,
+		}, true},
+		{"get document but prediction returns some error", &mockFileStorage{}, &mockInferenceService{}, &mockRepository{
+			document: &model.Document{
+				ID:               "1",
+				OriginalFilename: "invoice.pdf",
+				StoredFilename:   "123-321.pdf",
+				Status:           model.StatusDone,
+				CreatedAt:        time.Now().UTC(),
+			},
+			getPredictionError: fmt.Errorf("some error"),
+		}, true},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc := NewDocumentService(tt.storage, tt.repo)
-			mc := &mockCloserReader{io.NopCloser(strings.NewReader("data"))}
-			result, err := svc.Upload(context.Background(), mc, tt.filename)
+			ctx := context.Background()
+			svc := NewDocumentService(tt.storage, tt.repo, tt.inference)
+
+			documentView, err := svc.GetDocument(ctx, "1")
 
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expect an error got nothing")
 				}
-				if !(errors.Is(err, tt.storage.saveErr) || errors.Is(err, tt.repo.saveErr)) {
+				if !(errors.Is(err, tt.repo.getPredictionError) || errors.Is(err, tt.repo.getDocError)) {
+					t.Fatalf("expect no rows exception got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expect no error got %v", err)
+			}
+			if documentView == nil {
+				t.Fatalf("expect documentView got nil")
+			}
+			if documentView.Document == nil {
+				t.Fatalf("expect document got nil")
+			}
+			if tt.repo.getPredictionError == nil {
+				if documentView.Prediction == nil {
+					t.Fatalf("expect prediction got nil")
+				}
+			}
+
+		})
+	}
+}
+
+func TestDocumentService_Upload(t *testing.T) {
+	tests := []struct {
+		name      string
+		filename  string
+		storage   *mockFileStorage
+		repo      *mockRepository
+		inference *mockInferenceService
+		wantErr   bool
+	}{
+		{"success", "test.pdf", &mockFileStorage{}, &mockRepository{}, &mockInferenceService{}, false},
+		{"success empty file extension", "test", &mockFileStorage{}, &mockRepository{}, &mockInferenceService{}, false},
+		{"storage failure", "test.pdf", &mockFileStorage{saveErr: errors.New("disk is full")}, &mockRepository{}, &mockInferenceService{}, true},
+		{"repo failure", "test.pdf", &mockFileStorage{}, &mockRepository{saveErr: errors.New("db is down")}, &mockInferenceService{}, true},
+		{"inference service failure", "test.pdf", &mockFileStorage{}, &mockRepository{}, &mockInferenceService{predictErr: errors.New("inference service is down")}, true},
+		{"inference service failure and failed to update document status", "test.pdf", &mockFileStorage{}, &mockRepository{updateDocError: errors.New("failed update error")}, &mockInferenceService{predictErr: errors.New("inference service is down")}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			svc := NewDocumentService(tt.storage, tt.repo, tt.inference)
+			mc := &mockCloserReader{io.NopCloser(strings.NewReader("data"))}
+			result, err := svc.Upload(ctx, mc, tt.filename)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expect an error got nothing")
+				}
+				if !(errors.Is(err, tt.storage.saveErr) || errors.Is(err, tt.repo.saveErr) || errors.Is(err, tt.inference.predictErr)) {
 					t.Fatalf("expect specific error got %v", err)
 				}
 
@@ -91,6 +213,12 @@ func TestDocumentService_Upload(t *testing.T) {
 				t.Errorf("expected extension %s, got %s", filepath.Ext(tt.filename),
 					filepath.Ext(tt.storage.savedFilename))
 			}
+
+			if result.ID != tt.inference.InferenceResult.DocumentID {
+				t.Errorf("expected documentID %s, got %s", result.ID, tt.inference.InferenceResult.DocumentID)
+			}
+
+			//TODO remove filename as text and test real extraction.
 		})
 	}
 
