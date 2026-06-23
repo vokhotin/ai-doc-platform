@@ -1,1 +1,1 @@
-drop table predictions;
+DROP TABLE IF EXISTS predictions;

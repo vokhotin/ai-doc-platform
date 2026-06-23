@@ -60,22 +60,13 @@ func (s *DocumentService) Upload(
 	file multipart.File,
 	filename string,
 ) (*UploadResult, error) {
-	documentID := uuid.New().String()
-	extension := filepath.Ext(filename)
-	storedFilename := documentID + extension
-
-	err := s.fs.Save(storedFilename, file)
+	doc, err := s.saveFile(file, filename)
 	if err != nil {
 		return nil, err
 	}
 
-	doc := &model.Document{
-		ID:               documentID,
-		OriginalFilename: filename,
-		StoredFilename:   storedFilename,
-		Status:           model.StatusPending,
-		CreatedAt:        time.Now().UTC(),
-	}
+	slog.Info("saved file", "filename", filename)
+
 	err = s.repo.SaveDocument(ctx, doc)
 	if err != nil {
 		return nil, err
@@ -83,26 +74,13 @@ func (s *DocumentService) Upload(
 
 	slog.Info("saved document", "id", doc.ID)
 
-	inferenceResult, err := s.ic.Predict(ctx, doc.ID, doc.OriginalFilename)
+	prediction, err := s.predictDocumentType(ctx, doc)
 	if err != nil {
-		slog.Error("failed to predict type of document", "id", doc.ID, "error", err)
-		errUpdate := s.updateDocumentStatus(ctx, documentID, model.StatusFailed)
-		if errUpdate != nil {
-			return nil, fmt.Errorf("failed to predict and failed to update document status. prediction error: \n%w,"+
-				" \nUpdate document error\n%s", err, errUpdate)
-		}
 		return nil, err
 	}
 
-	slog.Info("predict result", "id", doc.ID, "label", inferenceResult.Label, "confidence", inferenceResult.Confidence)
+	slog.Info("get prediction", "id", prediction.ID)
 
-	prediction := &model.Prediction{
-		ID:         uuid.New().String(),
-		DocumentID: inferenceResult.DocumentID,
-		Label:      inferenceResult.Label,
-		Confidence: inferenceResult.Confidence,
-		CreatedAt:  time.Now().UTC(),
-	}
 	err = s.repo.SavePredictionAndMarkDocumentDone(ctx, prediction)
 	if err != nil {
 		return nil, err
@@ -111,18 +89,9 @@ func (s *DocumentService) Upload(
 	slog.Info("save prediction and updated document", "id", doc.ID, "predictionID", prediction.ID)
 
 	return &UploadResult{
-		ID:       documentID,
+		ID:       doc.ID,
 		Filename: filename,
 	}, nil
-}
-
-func (s *DocumentService) updateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error {
-	err := s.repo.UpdateDocumentStatus(ctx, documentID, status)
-	if err != nil {
-		slog.Error("failed to update document status", "id", documentID, "status", status, "error", err)
-		return err
-	}
-	return nil
 }
 
 func (s *DocumentService) GetDocument(ctx context.Context, id string) (*DocumentView, error) {
@@ -140,5 +109,56 @@ func (s *DocumentService) GetDocument(ctx context.Context, id string) (*Document
 	return &DocumentView{
 		Document:   document,
 		Prediction: prediction,
+	}, nil
+}
+
+func (s *DocumentService) predictDocumentType(ctx context.Context, doc *model.Document) (*model.Prediction, error) {
+	inferenceResult, err := s.ic.Predict(ctx, doc.ID, doc.OriginalFilename)
+	if err != nil {
+		slog.Error("failed to predict type of document", "id", doc.ID, "error", err)
+		errUpdate := s.updateDocumentStatus(ctx, doc.ID, model.StatusFailed)
+		if errUpdate != nil {
+			return nil, fmt.Errorf("failed to predict and failed to update document status. prediction error: \n%w,"+
+				" \nUpdate document error\n%s", err, errUpdate)
+		}
+		return nil, err
+	}
+
+	slog.Info("predict result", "id", doc.ID, "label", inferenceResult.Label, "confidence", inferenceResult.Confidence)
+
+	return &model.Prediction{
+		ID:         uuid.New().String(),
+		DocumentID: inferenceResult.DocumentID,
+		Label:      inferenceResult.Label,
+		Confidence: inferenceResult.Confidence,
+		CreatedAt:  time.Now().UTC(),
+	}, nil
+}
+
+func (s *DocumentService) updateDocumentStatus(ctx context.Context, documentID string, status model.DocumentStatus) error {
+	err := s.repo.UpdateDocumentStatus(ctx, documentID, status)
+	if err != nil {
+		slog.Error("failed to update document status", "id", documentID, "status", status, "error", err)
+		return err
+	}
+	return nil
+}
+
+func (s *DocumentService) saveFile(file multipart.File, filename string) (*model.Document, error) {
+	documentID := uuid.New().String()
+	extension := filepath.Ext(filename)
+	storedFilename := documentID + extension
+
+	err := s.fs.Save(storedFilename, file)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.Document{
+		ID:               documentID,
+		OriginalFilename: filename,
+		StoredFilename:   storedFilename,
+		Status:           model.StatusPending,
+		CreatedAt:        time.Now().UTC(),
 	}, nil
 }
