@@ -32,4 +32,5 @@ go.work.sum
 .idea/
 # .vscode/
 
-./gateway-service/uploads/
+gateway-service/uploads/
+.DS_Store
