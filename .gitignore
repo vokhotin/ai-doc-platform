@@ -34,3 +34,4 @@ go.work.sum
 
 gateway-service/uploads/
 .DS_Store
+cover.out
