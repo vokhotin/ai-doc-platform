@@ -29,6 +29,14 @@ services:
         volumes:
             - postgres_data:/var/lib/postgresql/data
     
+    inference-service:
+        build: ./inference-service
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+            interval: 5s
+            timeout: 5s
+            retries: 3
+    
 volumes:
     postgres_data:
     uploads_data:
